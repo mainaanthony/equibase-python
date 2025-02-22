@@ -6,8 +6,6 @@ import schedule
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-import requests
-from bs4 import BeautifulSoup
 from datetime import datetime
 
 def get_driver():
@@ -19,15 +17,13 @@ def get_driver():
     driver = uc.Chrome(options=options)
     return driver
 
-def get_horse_names():
+def get_horse_data():
     driver = get_driver()
     today_date = datetime.today().strftime('%m/%d/%y')
-    base_url = f"https://www.equibase.com/premium/eqpInTodayAction.cfm?DATE={today_date}&TYPE=H&VALUE="
-    
-    horse_names = []
+    horse_data = []
 
     for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
-        url = base_url + letter
+        url = f"https://www.equibase.com/premium/eqpInTodayAction.cfm?DATE={today_date}&TYPE=H&VALUE={letter}"
         driver.get(url)
         time.sleep(random.uniform(5, 12))  # Random wait time
 
@@ -39,29 +35,42 @@ def get_horse_names():
             rows = driver.find_elements(By.CSS_SELECTOR, ".table-padded tbody tr")
             for row in rows:
                 try:
-                    name = row.find_element(By.TAG_NAME, "a").text.strip()
-                    if name and name not in horse_names:
-                        horse_names.append(name)
-                        print(f"Added horse: {name}")
-                except Exception as e:
-                    print(f"Error extracting horse name: {e}")
-                    continue
-        except Exception as e:
-            print(f"No horses found for letter {letter}: {e}")
+                    horse_element = row.find_element(By.TAG_NAME, "a")
+                    horse_link = horse_element.get_attribute("href")
+                    horse_name = horse_element.text.strip()
+                    track = row.find_elements(By.TAG_NAME, "td")[1].text.strip()
+                    race = row.find_elements(By.TAG_NAME, "td")[2].text.strip()
+                    jockey = row.find_elements(By.TAG_NAME, "td")[3].text.strip()
+                    trainer = row.find_elements(By.TAG_NAME, "td")[4].text.strip()
+                    owner = row.find_elements(By.TAG_NAME, "td")[5].text.strip()
+                    pps = row.find_elements(By.TAG_NAME, "td")[6].text.strip()
 
-        # Scroll down a bit to look more human
-        driver.execute_script("window.scrollBy(0, 500);")
-        time.sleep(random.uniform(3, 7))  # Vary the wait time
+                    horse = {
+                        "name": horse_name,
+                        "link": horse_link,
+                        "track": track,
+                        "race": race,
+                        "jockey": jockey,
+                        "trainer": trainer,
+                        "owner": owner,
+                        "pps": pps
+                    }
+                    horse_data.append(horse)
+                    print(f"Added horse: {horse_name}")
+                    print(f"Link: {horse_link}")
+                except Exception as e:
+                    print(f"Error extracting horse data: {e}")
+                    continue
+
+        except Exception as e:
+            print(f"Failed to fetch horse data for letter {letter}: {e}")
 
     driver.quit()
-    print(f"Total horses found: {len(horse_names)}")
-    return horse_names
+    return horse_data
 
-def get_horse_stats(horse_name):
+def get_horse_stats(horse_link):
     driver = get_driver()
-    
-    search_url = f"https://www.equibase.com/profiles/Results.cfm?type=Horse&searchName={horse_name.replace(' ', '%20')}"
-    driver.get(search_url)
+    driver.get(horse_link)
     
     try:
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CSS_SELECTOR, "#data-table tbody tr")))
@@ -72,7 +81,6 @@ def get_horse_stats(horse_name):
         
         # Initialize stats
         stats = {
-            "Horse": horse_name,
             "Starts": "0",
             "Firsts": "0",
             "Seconds": "0",
@@ -88,48 +96,13 @@ def get_horse_stats(horse_name):
             stats["Seconds"] = cols[3].text.strip()
             stats["Thirds"] = cols[4].text.strip()
         
-        print(f"Stats for {horse_name}: {stats}")
+        print(f"Stats Data : {stats}")
         return stats
     except Exception as e:
-        print(f"Failed to fetch data for {horse_name}: {e}")
+        print(f"Failed to fetch data for {horse_link}: {e}")
         return None
     finally:
         driver.quit()
-
-def get_horse_data():
-    url = "https://www.equibase.com/premium/eqpInTodayAction.cfm?DATE=02/19/25&TYPE=H&VALUE=A"
-    try:
-        response = requests.get(url, timeout=30)  # Increase timeout
-        response.raise_for_status()  # Raise an error for bad responses
-    except requests.exceptions.RequestException as e:
-        print(f"Error fetching horse data: {e}")
-        return []
-
-    soup = BeautifulSoup(response.content, "html.parser")
-    table = soup.find("table", {"class": "table-padded fullwidth phone-hide desktop-show tablet-show"})
-    
-    if table is None:
-        print("No table found on the page.")
-        return []
-
-    rows = table.find_all("tr")
-
-    horses = []
-    for row in rows:
-        cols = row.find_all("td")
-        if len(cols) > 0:  # Ensure there are columns
-            horse = {
-                "name": cols[0].text.strip(),
-                "track": cols[1].text.strip(),
-                "race": cols[2].text.strip(),
-                "jockey": cols[3].text.strip(),
-                "trainer": cols[4].text.strip(),
-                "owner": cols[5].text.strip(),
-                "pps": cols[6].text.strip()
-            }
-            horses.append(horse)
-
-    return horses
 
 def save_to_excel(data):
     df = pd.DataFrame(data)
@@ -137,12 +110,11 @@ def save_to_excel(data):
     print("Data saved to horse_stats.xlsx")
 
 def scrape_horses():
-    horse_names = get_horse_names()
     horse_data = get_horse_data()
     all_horse_data = []
     
     for horse in horse_data:
-        stats = get_horse_stats(horse["name"])
+        stats = get_horse_stats(horse["link"])
         if stats:
             horse.update(stats)
             all_horse_data.append(horse)
